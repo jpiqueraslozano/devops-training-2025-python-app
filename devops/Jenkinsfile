@@ -1,53 +1,58 @@
-#!groovy
-
-//@Library('functions')_
-
 pipeline {
-	agent any // Default Agent
+    agent any
 
-  
-  stages {
-
-    stage('Init') {
-    	
-      steps {
-      	sh 'docker ps'
-      }
+    environment {
+        SONARQUBE_ENV = 'sonarqube-devops' // Cambia esto si tu servidor Sonar tiene otro nombre
     }
-    
-    stage('Test') {
-      // Specifies where the entire Pipeline, or a specific stage, will execute in the Jenkins environment depending on where the agent section is placed
-    	agent {
-      	docker {
-        	image 'maven:3.8.6-openjdk-11-slim'
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-      steps {
-      	sh 'mvn test'
-      }
+
+        stage('Install dependencies and test') {
+            agent {
+                docker {
+                    image 'python:3.11-slim'
+                }
+            }
+            steps {
+                sh '''
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                    pytest --junitxml=results.xml
+                '''
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_ENV}") {
+                    sh '''
+                        sonar-scanner \
+                        -Dsonar.projectKey=python-example \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=$SONAR_HOST_URL \
+                        -Dsonar.login=$SONAR_AUTH_TOKEN
+                    '''
+                }
+            }
+        }
+
     }
 
-    
-
-  }
-
-  post {
-    always  {
-      sh 'docker logout'
-      
+    post {
+        always {
+            junit 'results.xml'
+        }
+        success {
+            echo "Pipeline ejecutada correctamente ✅"
+        }
+        failure {
+            echo "La pipeline ha fallado ❌"
+        }
     }
-    success {
-      echo "SUCCESS"
-    }
-  }
-  
-}
-
-
-def getLastGitTag() {
-    sh "git tag --sort version:refname | head -n 1 > version.tmp"
-    String tag = readFile 'version.tmp'
-    echo "Branch: ${scm.branches[0].name}"
-    echo "Tag, ${tag}." 
-    return tag
 }
